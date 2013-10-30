@@ -38,6 +38,7 @@ type Path
   first_time    # time of first pickup
   dead          # Hack for now
   generation    # Hack for now
+  visited       # Boolean matrix of previously visited nodes
 end
 function print(io::IO, p::Path)
   print(io,"Path(")

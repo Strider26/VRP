@@ -4,13 +4,14 @@ using Gurobi
 # CheckVisitedBefore
 # Checks if a partial path includes a node
 function CheckVisitedBefore(partial, j, t_j)
-  for prev_node in partial.order
-    if prev_node[1] == j && prev_node[2] == t_j
-      # Visited before, skip
-      return true
-    end
-  end
-  return false
+  #for prev_node in partial.order
+  #  if prev_node[1] == j && prev_node[2] == t_j
+  #    # Visited before, skip
+  #    return true
+  #  end
+  #end
+  #return false
+  return partial.visited[j,t_j]
 end
 
 ###############################################################################
@@ -37,8 +38,10 @@ function ExtendPath(partial, rc, dist, demand, arrival_time, j, t_j, counter)
                   arrival_time,
                   partial.first_time,
                   false,
-                  counter + 1)
+                  counter + 1,
+                  copy(partial.visited))
   push!(new_path.order, (j,t_j))
+  new_path.visited[j,t_j] = true
   return new_path
 end
 
@@ -97,6 +100,8 @@ function SeedPaths(nodes, node_duals, depot_dists)
         continue
       end
       # Seed new path to this node
+      visited = zeros(Bool, num_nodes, 24)
+      visited[i,t_i] = true
       newPath = Path(rc,                # Reduced cost so far (goal is for negative)
                      depot_dists[i],    # True miles travelled
                      demand,            # Resources used so far
@@ -104,7 +109,8 @@ function SeedPaths(nodes, node_duals, depot_dists)
                      max(depot_dists[i]*DISTTIME, t_i),  # cur end of path time
                      t_i,               # First pickup time
                      false,             # Mark route as not-dead
-                     1)                 # Generation
+                     1,                 # Generation
+                     visited)           # Nodes visited
       push!(partial_paths[i,t_i], newPath)
     end
   end
@@ -126,40 +132,6 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
   num_nodes = length(nodes)
   # Depot is the (n+1)th location
   depot = num_nodes+1
-
-  # Returns true distance between any two nodes
-  function trueDist(i,j)
-    if i == depot
-      return (j == depot) ? 0 : depot_dists[j]
-    else
-      return (j == depot) ? depot_dists[i] : dists[i,j]
-    end
-  end
-
-  # Calculates the "adjusted" distance between two locations 
-  # using the duals and the time slice that virtual node refers to
-  function adjDist(i,t_i, j,t_j)
-    if i == depot
-      return (j == depot) ? 0 : (depot_dists[j] - node_duals[j,t_j])
-    else
-      if j == depot
-        # Non-depot to depot
-        return depot_dists[i]
-      else
-        # Non-depot to non-depot
-        if i == j
-          if t_j <= t_i
-            return 10000.0
-          else
-            # No travel distance
-            return -node_duals[j,t_j] + 1e-6
-          end
-        else
-          return dists[i,j] - node_duals[j,t_j]
-        end
-      end
-    end
-  end
 
   # Initiliaze paths by starting a route to all contender nodes
   partial_paths = SeedPaths(nodes, node_duals, depot_dists)
@@ -189,7 +161,7 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
           # j = depot
           # Only worth coming back straight away, why come back later?
           # Need to check we won't get back too late though
-          arrival_time = partial.early_time + depot_dists[i]*DISTTIME  
+          arrival_time = partial.early_time + depot_dists[i]*DISTTIME
           if arrival_time - partial.first_time >= MAXTRUCKTIME
             # OPT: This path can not make it back to the depot
             # As a result any further extension of this path is pointless -
@@ -200,15 +172,16 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
           # Made it back in time, add to depots list
           # TODO: Because we never extend these, perhaps shouldn't even bother with
           #       this churn? Probably not time critical
-          new_path = Path(partial.rc + adjDist(i,t_i, depot,t_i),
+          new_path = Path(partial.rc + depot_dists[i],
                           partial.dist + depot_dists[i],
                           partial.res_used,
                           copy(partial.order),
                           arrival_time,
                           partial.first_time,
                           false,
-                          arbitrary_counter + 1)
-          push!(new_path.order, (depot, t_i))  # PERF 4%
+                          arbitrary_counter + 1,
+                          copy(partial.visited))
+          push!(new_path.order, (depot, t_i))  # PERF: 10% (this and prev)
           push!(partial_paths[depot,t_i], new_path)
 
           # OTHER NODES
@@ -219,24 +192,24 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
             max_t_j = 24
 
             for t_j = min_t_j:max_t_j
-              extension_rc = adjDist(i,t_i, j,t_j)  # PERF: 28%
+              extension_rc = dists[i,j] - node_duals[j,t_j]
 
               # OPT: Don't go here if it isn't going to help
               if extension_rc >= -TOL
                 continue
               end
-              demand_j_t_j = nodes[j].demand[t_j]  # PERF 3%
+              demand_j_t_j = nodes[j].demand[t_j]  # PERF 7%
               if demand_j_t_j == 0
                 continue
               end
 
               # Check - Visited before (elementary-ness)
-              if CheckVisitedBefore(partial, j, t_j)  # PERF 54%
+              if CheckVisitedBefore(partial, j, t_j)  # PERF 3%
                 continue
               end
 
               # Check Would going here violate capacity? Is there demand there?
-              if demand_j_t_j + partial.res_used > CAPACITY  # PERF 3%
+              if demand_j_t_j + partial.res_used > CAPACITY  # PERF 5%
                 continue
               end
 
@@ -250,7 +223,7 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
               # Add (j,t_j) to it and move it to that node
               push!(partial_paths[j,t_j], ExtendPath(partial, extension_rc, dists[i,j],
                                                      demand_j_t_j, arrival_time, j, t_j,
-                                                     arbitrary_counter))  # PERF 5%
+                                                     arbitrary_counter))  # PERF 12%
             end  # t_j
           end  # j
           partial.dead = true
