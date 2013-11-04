@@ -30,9 +30,9 @@ type Route
 end
 
 type Path
-  rc            # reduced cost so far
-  dist          # true distance so far
-  res_used      # resources used so far
+  rc::Float64           # reduced cost so far
+  dist::Float64         # true distance so far
+  res_used::Int         # resources used so far
   order         # order of virtual nodes visited
   early_time    # earliest possible time to be at end of path
   first_time    # time of first pickup
@@ -125,7 +125,7 @@ end
 function SolveVRP()
   nodes = LoadData("demand.csv")
   # Truncate nodes for testing purposes
-  nodes = nodes[1:4]
+  nodes = nodes[1:40]
   num_nodes = length(nodes)
   dists = CalculatePairwise(nodes)
   println(dists)
@@ -158,7 +158,7 @@ function SolveVRP()
   # (except for now, just do 10 passes)
   total_master_time = 0.0
   total_routegen_time = 0.0
-  for iter = 1:10
+  for iter = 1:100
     println("ITER $iter")
     # Solve master problem to get duals
     tic()

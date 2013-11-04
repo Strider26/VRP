@@ -138,7 +138,7 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
   
   # Build paths!
   println("  SUB: Finding route")
-  for arbitrary_counter = 1:10
+  for arbitrary_counter = 1:20
     print(" $arbitrary_counter")
     # Phase 1 - Extend paths
     for i = 1:num_nodes
@@ -172,17 +172,9 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
           # Made it back in time, add to depots list
           # TODO: Because we never extend these, perhaps shouldn't even bother with
           #       this churn? Probably not time critical
-          new_path = Path(partial.rc + depot_dists[i],
-                          partial.dist + depot_dists[i],
-                          partial.res_used,
-                          copy(partial.order),
-                          arrival_time,
-                          partial.first_time,
-                          false,
-                          arbitrary_counter + 1,
-                          copy(partial.visited))
-          push!(new_path.order, (depot, t_i))  # PERF: 10% (this and prev)
-          push!(partial_paths[depot,t_i], new_path)
+          # NB: No visited boolean for depot
+          push!(partial_paths[depot,t_i], ExtendPath(partial, depot_dists[i], depot_dists[i],
+                                                 0, arrival_time, i, t_i, arbitrary_counter))
 
           # OTHER NODES
           for j = 1:num_nodes
@@ -198,18 +190,18 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
               if extension_rc >= -TOL
                 continue
               end
-              demand_j_t_j = nodes[j].demand[t_j]  # PERF 7%
+              demand_j_t_j = nodes[j].demand[t_j]
               if demand_j_t_j == 0
                 continue
               end
 
               # Check - Visited before (elementary-ness)
-              if CheckVisitedBefore(partial, j, t_j)  # PERF 3%
+              if CheckVisitedBefore(partial, j, t_j)
                 continue
               end
 
               # Check Would going here violate capacity? Is there demand there?
-              if demand_j_t_j + partial.res_used > CAPACITY  # PERF 5%
+              if demand_j_t_j + partial.res_used > CAPACITY
                 continue
               end
 
@@ -223,7 +215,7 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists)
               # Add (j,t_j) to it and move it to that node
               push!(partial_paths[j,t_j], ExtendPath(partial, extension_rc, dists[i,j],
                                                      demand_j_t_j, arrival_time, j, t_j,
-                                                     arbitrary_counter))  # PERF 12%
+                                                     arbitrary_counter))
             end  # t_j
           end  # j
           partial.dead = true
