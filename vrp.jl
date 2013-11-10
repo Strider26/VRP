@@ -4,6 +4,7 @@ const DISTTIME = 1/50  # Assume 50mph
 const CAPACITY = 2500
 const MAXTRUCKTIME = 8  # From first pickup
 const TOL = 1e-6
+const TRUCKFIXED = 0.5
 
 # Distance calculations
 include("distance.jl")
@@ -122,24 +123,24 @@ function PrintRoutes(routes, nodes, thresh=0.1)
 end
 
 
-function SolveVRP()
-  nodes = LoadData("demand.csv")
+function SolveVRP(lambda)
+  nodes = LoadData("new_demand.csv")
   # Truncate nodes for testing purposes
-  nodes = nodes[1:40]
+  #nodes = nodes[2:2]
   num_nodes = length(nodes)
   dists = CalculatePairwise(nodes)
   println(dists)
 
   # Not sure where the main depot is so just take average of all nodes
   # lat/lon for now
-  depot_lat = 0
-  depot_lon = 0
-  for node in nodes
-    depot_lat += node.lat + 0.1
-    depot_lon += node.lon + 0.1
-  end
-  depot_lat /= num_nodes
-  depot_lon /= num_nodes
+  depot_lat = 42.35357 #0
+  depot_lon = -71.100318 #0
+  #for node in nodes
+  #  depot_lat += node.lat + 0.1
+  #  depot_lon += node.lon + 0.1
+  #end
+  #depot_lat /= num_nodes
+  #depot_lon /= num_nodes
   depot_dists = zeros(num_nodes)
   for i = 1:num_nodes
     depot_dists[i] = haversine(nodes[i].lat, nodes[i].lon, depot_lat, depot_lon)
@@ -149,8 +150,7 @@ function SolveVRP()
 
   # Provide default set of routes
   # Initially just use one truck for every location and time of day
-  routes = GenerateInitialRoutes(nodes, dists, depot_dists)
-  #routes = NaiveInitialRoutes(nodes, dists, depot_dists)
+  routes = GenerateInitialRoutes(nodes, dists, depot_dists, lambda)
   PrintRoutes(routes, nodes)
   a = readline(STDIN)
 
@@ -166,12 +166,8 @@ function SolveVRP()
     total_master_time += toq()
     # Solve sub problem to get a new route (maybe)
     tic()
-    new_route = SolveSubproblem(node_duals, nodes, dists, depot_dists)
+    new_route = SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
     total_routegen_time += toq()
-
-    @profile SolveSubproblem(node_duals, nodes, dists, depot_dists)
-    
-
     if new_route == nothing
       # Done!
       println("Done")
@@ -188,7 +184,7 @@ function SolveVRP()
   println("Routegen: $total_routegen_time")
   println("Total: $(total_master_time + total_routegen_time)")
 
-  Profile.print(format=:flat)
+  #Profile.print(format=:flat)
 end
 
-SolveVRP()
+SolveVRP(0.8)
