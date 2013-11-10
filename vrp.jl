@@ -174,6 +174,8 @@ function SolveVRP(lambda)
       break
     else
       # Add route
+      println("New route:")
+      PrintRoutes([new_route], nodes, -0.1)
       push!(routes, new_route)
     end
   end
