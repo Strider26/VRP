@@ -5,6 +5,9 @@ function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
   num_nodes = length(nodes)
   depot = num_nodes+1  # Depot is the (n+1)th location
 
+  # Create Gurobi Mode
+  # Disable output
+  # Relative MIP optimality gap=0.10
   m = Model(:Min, mipsolver=GurobiSolver(OutputFlag=0, MIPGap=0.10))
 
   @defVar(m, x[i=1:depot,t_i=1:24,j=1:depot,t_j=1:24], Bin)

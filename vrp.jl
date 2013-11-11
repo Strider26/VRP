@@ -6,6 +6,12 @@ const MAXTRUCKTIME = 8  # From first pickup
 const TOL = 1e-6
 const TRUCKFIXED = 0.5
 
+
+# INPUT PARAMETERS
+const DEMAND_INPUT_FILE = "new_demand.csv"
+const LAMBDA = 0.8
+const PRINT_LEVEL = 0 # true - full printf on false - off
+
 # Distance calculations
 include("distance.jl")
 # Initial route generation
@@ -41,6 +47,7 @@ type Path
   generation    # Hack for now
   visited       # Boolean matrix of previously visited nodes
 end
+
 function print(io::IO, p::Path)
   print(io,"Path(")
   print(io,"RC:",round(p.rc,2))
@@ -54,9 +61,13 @@ function print(io::IO, p::Path)
   print(io,")")
 end
 
-#####################################################################
+###############################################################################
 # CalculatePairwise
 # Use great-circle distance to calculate pairwise node distances
+# Inputs:
+#  nodes        List of nodes
+# Outputs:
+#  dmat         Pairwise distance matrix in km
 function CalculatePairwise(nodes)
   N = length(nodes)
   latlon = zeros(N,2)
@@ -67,13 +78,14 @@ function CalculatePairwise(nodes)
   return buildDistanceMatrix(latlon)
 end
 
-
-#####################################################################
+###############################################################################
 # LoadData
 # Loads the demand and location data from a .csv file
-function LoadData(filepath)
-  # Build up list of nodes
-  nodes = Node[]
+# Inputs:
+#  filepath     filepath to demand dataset
+# Outputs:
+#  nodes        Array of Nodes structure
+function LoadData!(filepath, nodes)
   # Open file
   fp = open(filepath, "r")
   # Skip first line (header)
@@ -92,12 +104,19 @@ function LoadData(filepath)
     # Add it to the list
     push!(nodes, new_node)
   end
-  return nodes
 end
 
 
-#####################################################################
+###############################################################################
 # PrintRoutes
+#  Prints the routes in the form of the route number, cost, # of Visits, and Demand
+#  picked up at that node during the visit
+# Inputs:
+#  routes
+#  nodes
+#  thresh
+# Outputs:
+#  none
 function PrintRoutes(routes, nodes, thresh=0.1)
   num_nodes = length(nodes)
   
@@ -123,18 +142,33 @@ function PrintRoutes(routes, nodes, thresh=0.1)
 end
 
 
+# Function:  SolveVRP
+# --------------------
+#   description:    solves vehicle route problem
+#   inputs:         the weight to apply to the minimum cost portion of the object function
+#   outputs:        Optimal routes in printf form
 function SolveVRP(lambda)
-  nodes = LoadData("new_demand.csv")
+  # load in demand data for the nodes in consideration
+  # Build up list of nodes
+  nodes = Node[]
+  LoadData!(DEMAND_INPUT_FILE, nodes)
+  println("Loaded demand file: ", DEMAND_INPUT_FILE)
+
   # Truncate nodes for testing purposes
-  #nodes = nodes[2:2]
+  nodes = nodes[2:2]
+
+  # for every node calculate the pairwise greater circle distance
   num_nodes = length(nodes)
   dists = CalculatePairwise(nodes)
-  println(dists)
+  if PRINT_LEVEL == 1
+    println(dists)
+  end
+  println("Calculated pairwise greater circle distances")
 
-  # Not sure where the main depot is so just take average of all nodes
-  # lat/lon for now
-  depot_lat = 42.35357 #0
-  depot_lon = -71.100318 #0
+  # Depot location is in Central Square
+  depot_lat = 42.36376 #0
+  depot_lon = -71.10028 #0
+
   #for node in nodes
   #  depot_lat += node.lat + 0.1
   #  depot_lon += node.lon + 0.1
@@ -146,12 +180,19 @@ function SolveVRP(lambda)
     depot_dists[i] = haversine(nodes[i].lat, nodes[i].lon, depot_lat, depot_lon)
   end
   depot_dists .*= 0.621371  # km to miles
-  println(depot_dists)
+  if PRINT_LEVEL == 1
+    println(depot_dists)
+  end
 
   # Provide default set of routes
   # Initially just use one truck for every location and time of day
   routes = GenerateInitialRoutes(nodes, dists, depot_dists, lambda)
-  PrintRoutes(routes, nodes)
+  println("Generated initial routes")
+  if PRINT_LEVEL == 1
+    PrintRoutes(routes, nodes)
+  end
+
+  println("Hit enter to start solving")
   a = readline(STDIN)
 
   # Iterate until no new routes generated
@@ -160,8 +201,9 @@ function SolveVRP(lambda)
   total_routegen_time = 0.0
   for iter = 1:100
     println("ITER $iter")
-    # Solve master problem to get duals
+    # start timer
     tic()
+    # Solve master problem to get duals
     node_duals, sel_routes = SolveMaster(routes, nodes)
     total_master_time += toq()
     # Solve sub problem to get a new route (maybe)
@@ -189,4 +231,4 @@ function SolveVRP(lambda)
   #Profile.print(format=:flat)
 end
 
-SolveVRP(0.8)
+SolveVRP(LAMBDA)

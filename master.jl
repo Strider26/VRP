@@ -1,13 +1,19 @@
-#####################################################################
+###############################################################################
 # SolveMaster
-# Given a set of routes, select a subset that takes all demand 
+# Given a set of routes, select a subset that takes all demand
 # for minimum cost.
+# Inputs:
+#  routes
+#  nodes
+# Outputs:
+#  node_duals
+#  sel_routes
 function SolveMaster(routes, nodes)
   # Solve the master problem, returns the duals
   num_routes = length(routes)
   num_nodes = length(nodes)
 
-  # Create the master model
+  # Create the master model (See VRPDP.pdf for model definition)
   m = Model(:Min)
 
   # Create a variable for every route
