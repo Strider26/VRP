@@ -4,7 +4,7 @@ const DISTTIME = 1/50  # Assume 50mph
 const CAPACITY = 2500
 const MAXTRUCKTIME = 8  # From first pickup
 const TOL = 1e-6
-const TRUCKFIXED = 0.5
+const TRUCKFIXED = 3.0
 
 
 # INPUT PARAMETERS
@@ -155,7 +155,7 @@ function SolveVRP(lambda)
   println("Loaded demand file: ", DEMAND_INPUT_FILE)
 
   # Truncate nodes for testing purposes
-  nodes = nodes[2:2]
+  #nodes = nodes[1:]
 
   # for every node calculate the pairwise greater circle distance
   num_nodes = length(nodes)
@@ -206,19 +206,25 @@ function SolveVRP(lambda)
     # Solve master problem to get duals
     node_duals, sel_routes = SolveMaster(routes, nodes)
     total_master_time += toq()
-    # Solve sub problem to get a new route (maybe)
+    # Solve integer solution to get cur solution
+    sel_mip_routes, mip_obj = SolveMasterMIP(routes, nodes)
+    println("Current integer solution: $mip_obj")
+    PrintRoutes(sel_mip_routes, nodes)
+    # Solve sub problem to get new routes (maybe)
     tic()
-    new_route = SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
+    new_routes = SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
     total_routegen_time += toq()
-    if new_route == nothing
+    if length(new_routes) == 0
       # Done!
       println("Done")
       break
     else
-      # Add route
-      println("New route:")
-      PrintRoutes([new_route], nodes, -0.1)
-      push!(routes, new_route)
+      # Add routes
+      println("New routes:")
+      PrintRoutes(new_routes, nodes, -0.1)
+      for r in new_routes
+        push!(routes, r)
+      end
     end
   end
   println("Selected routes:")

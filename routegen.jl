@@ -5,10 +5,10 @@ function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
   num_nodes = length(nodes)
   depot = num_nodes+1  # Depot is the (n+1)th location
 
-  # Create Gurobi Mode
+  # Create Gurobi Model
   # Disable output
   # Relative MIP optimality gap=0.10
-  m = Model(:Min, mipsolver=GurobiSolver(OutputFlag=0, MIPGap=0.10))
+  m = Model(:Min, mipsolver=GurobiSolver(OutputFlag=0, MIPGap=0.10, TimeLimit=60.0))
 
   @defVar(m, x[i=1:depot,t_i=1:24,j=1:depot,t_j=1:24], Bin)
   @defVar(m, a[i=1:depot,t_i=1:24] >= t_i)
@@ -146,15 +146,7 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
 
   num_nodes = length(nodes)
   depot = num_nodes+1  # Depot is the (n+1)th location
-
-  #println("  node_duals")
-  #for i = 1:num_nodes
-  #  for t_i = 1:24
-  #    if node_duals[i,t_i] != 0.0
-  #      println("    $i $t_i $(node_duals[i,t_i])")
-  #    end
-  #  end
-  #end
+  negrc_routes = Route[]
 
   # Grid search initially
   println("  SUB: Grid search on T")
@@ -163,81 +155,71 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
   for i = 1:num_nodes
     for t_i = 1:24
       if node_duals[i,t_i] != 0.0
-        first_T = min(first_T, t_i) + 0.5
-        last_T  = max(last_T,  t_i) + 0.5
+        first_T = min(first_T, t_i)
+        last_T  = max(last_T,  t_i)
       end
     end
   end
-  #blah = readline(STDIN)
-  best_x, best_T, best_colObj, best_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, first_T-1, true)
-  for grid_T = (first_T):1:(last_T)
-    #println("       grid_T = $grid_T")
-    cur_x, cur_T, cur_colObj, cur_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, grid_T, true)
+  
+  println("       grid_T = ")
+  for grid_T = (first_T-1):1:(last_T)
+    print(round(grid_T+0.5,1), "..")
+    cur_x, cur_T, cur_colObj, cur_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, grid_T+0.5, true)
     if cur_colObj < 0
       # WTF happened
       println("        Something aberrant happened for grid_T = $grid_T, colobj < 0")
       continue
     end
-    if cur_rcObj < best_rcObj - 1e-6
-      best_x = cur_x[1:depot,1:24,1:depot,1:24]
-      best_T = cur_T
-      best_colObj = cur_colObj
-      best_rcObj = cur_rcObj
-      #if best_rcObj < -1e-6
-      #  break
-      #end
-    end
-    #println("       $cur_colObj")
-    #blah = readline(STDIN)
-  end
-  println("  SUB: Best initial T: ", best_T)
-  println("  SUB: Best initial rc: ", best_rcObj)
-  println("  SUB: Best initial col: ", best_colObj)
-  next_T = best_T
-
-  for iter = 1:10
-    if best_rcObj < -1e-6
-      break
-    end
-    println("  SUB: Iter $iter, next_T: ", next_T)
-    cur_x, cur_T, cur_colObj, cur_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, next_T)
-    println("         Cur T: ", cur_T)
-    println("         Cur rc: ", cur_rcObj)
-    println("         Cur col: ", cur_colObj)
-    if cur_rcObj < best_rcObj - 1e-6 && cur_colObj > 0
-      best_x = cur_x[1:depot,1:24,1:depot,1:24]
-      best_T = cur_T
-      best_colObj = cur_colObj
-      best_rcObj = cur_rcObj
-    end
-    if abs(next_T-cur_T)/next_T <= 0.05
-      println("         Difference between next_T and cur_T below 5% ", abs(next_T-cur_T)/next_T)
-      break
-    end
-    next_T = 0.5*next_T + 0.5*cur_T
-    #blah = readline(STDIN)
-  end
-
-  if best_rcObj < -1e-6
-    # New route!
-    println("  SUB: Found route")
-    visits = zeros(num_nodes, 24)
-    for i = 1:depot
-      for t_i = 1:24
-        for j = 1:num_nodes
-          for t_j = 1:24
-            if best_x[i,t_i,j,t_j] >= 1-1e-6
-              visits[j,t_j] = 1
+    
+    # If its good, take it
+    if cur_rcObj < -1e-6
+      visits = zeros(num_nodes, 24)
+      for i = 1:depot
+        for t_i = 1:24
+          for j = 1:num_nodes
+            for t_j = 1:24
+              if cur_x[i,t_i,j,t_j] >= 1-1e-6
+                visits[j,t_j] = 1
+              end
             end
           end
         end
       end
+      push!(negrc_routes, Route(cur_colObj, visits, 0.0))
     end
-    return Route(best_colObj, visits, 0.0)
-  else
-    # no new route
-    println("  SUB: Didn't find route")
-    return nothing
   end
+  println("")
+  
+
+  if length(negrc_routes) > 0
+    # New routes
+    println("  SUB: Found routes, #$(length(negrc_routes))")
+    # Deduplicate
+    dedup_routes = Route[]
+    for i in 1:length(negrc_routes)
+      was_dup = false
+      for j in (i+1):length(negrc_routes)
+        if negrc_routes[i].visits == negrc_routes[j].visits
+          # Take j over i unless one is better than the other
+          if negrc_routes[i].cost < negrc_routes[j].cost - 1e-6
+            push!(dedup_routes, negrc_routes[i])
+          else
+            # We'll take j when we get to it
+          end
+          was_dup = true
+          break
+        end
+      end
+      if !was_dup
+        # Wasn't dupe
+        push!(dedup_routes, negrc_routes[i])
+      end
+    end
+    println("  SUB: Deduplicated routes, #$(length(dedup_routes))")
+  else
+    # No new routes
+    println("  SUB: Didn't find route")
+  end
+  return negrc_routes
 end
 
