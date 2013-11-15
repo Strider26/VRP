@@ -14,13 +14,13 @@ function SolveMaster(routes, nodes)
   num_nodes = length(nodes)
 
   # Create the master model (See VRPDP.pdf for model definition)
-  m = Model(:Min)
+  m = Model()
 
   # Create a variable for every route
   @defVar(m, 0 <= x[1:num_routes] <= 1)
 
   # Minimize cost of selected routes
-  @setObjective(m, sum{routes[r].cost * x[r], r=1:num_routes})
+  @setObjective(m, Min, sum{routes[r].cost * x[r], r=1:num_routes})
 
   # All locations at all times must be visited at least once if
   # it has non-zero demand
@@ -64,9 +64,7 @@ function SolveMaster(routes, nodes)
     end
   end
 
-  Profile.print(format=:flat)
   return node_duals, sel_routes
-
 end
 
 
@@ -86,13 +84,13 @@ function SolveMasterMIP(routes, nodes)
   num_nodes = length(nodes)
 
   # Create the master model (See VRPDP.pdf for model definition)
-  m = Model(:Min)
+  m = Model()
 
   # Create a variable for every route
-  @defVar(m, 0 <= x[1:num_routes] <= 1, Bin)
+  @defVar(m, 0 <= x[1:num_routes] <= 1, Int)
 
   # Minimize cost of selected routes
-  @setObjective(m, sum{routes[r].cost * x[r], r=1:num_routes})
+  @setObjective(m, Min, sum{routes[r].cost * x[r], r=1:num_routes})
 
   # All locations at all times must be visited at least once if
   # it has non-zero demand

@@ -9,7 +9,7 @@ const TRUCKFIXED = 3.0
 
 # INPUT PARAMETERS
 const DEMAND_INPUT_FILE = "new_demand.csv"
-const LAMBDA = 0.8
+const LAMBDA = 0.95
 const PRINT_LEVEL = 0 # true - full printf on false - off
 
 # Distance calculations
@@ -36,31 +36,6 @@ type Route
   x
 end
 
-type Path
-  rc::Float64           # reduced cost so far
-  dist::Float64         # true distance so far
-  res_used::Int         # resources used so far
-  order         # order of virtual nodes visited
-  early_time    # earliest possible time to be at end of path
-  first_time    # time of first pickup
-  dead          # Hack for now
-  generation    # Hack for now
-  visited       # Boolean matrix of previously visited nodes
-end
-
-function print(io::IO, p::Path)
-  print(io,"Path(")
-  print(io,"RC:",round(p.rc,2))
-  print(io,",D:",round(p.dist,2))
-  print(io,",RES:",p.res_used,",[")
-  for o in p.order
-    print(io,"(",o[1],"-",o[2],")")
-  end
-  print(io,"],ET:",int(p.early_time))
-  print(io,",FT:",int(p.first_time))
-  print(io,")")
-end
-
 ###############################################################################
 # CalculatePairwise
 # Use great-circle distance to calculate pairwise node distances
@@ -83,9 +58,11 @@ end
 # Loads the demand and location data from a .csv file
 # Inputs:
 #  filepath     filepath to demand dataset
+#  bunchsize    aggregate demand into bunchsize blocks
+#               e.g. =2 -> D(t=2)' = D(t=1)+D(t=2)
 # Outputs:
 #  nodes        Array of Nodes structure
-function LoadData!(filepath, nodes)
+function LoadData!(filepath, nodes, bunchsize=1)
   # Open file
   fp = open(filepath, "r")
   # Skip first line (header)
@@ -101,6 +78,18 @@ function LoadData!(filepath, nodes)
                     float(spl[2]),   # Lat
                     float(spl[3]),   # Lon
                     int(spl[4:27]))  # Demand (hourly)
+    # Bunch demand, if desired
+    new_demand = new_node.demand[:]
+    for t_i = bunchsize:bunchsize:24
+      accum = 0
+      for t_j = (t_i-bunchsize+1):t_i
+        accum += new_demand[t_j]
+        new_demand[t_j] = 0
+      end
+      new_demand[t_i] = accum
+    end
+    new_node.demand = new_demand
+    #println(new_demand)
     # Add it to the list
     push!(nodes, new_node)
   end
@@ -151,7 +140,7 @@ function SolveVRP(lambda)
   # load in demand data for the nodes in consideration
   # Build up list of nodes
   nodes = Node[]
-  LoadData!(DEMAND_INPUT_FILE, nodes)
+  LoadData!(DEMAND_INPUT_FILE, nodes, 4)
   println("Loaded demand file: ", DEMAND_INPUT_FILE)
 
   # Truncate nodes for testing purposes
@@ -199,7 +188,7 @@ function SolveVRP(lambda)
   # (except for now, just do 10 passes)
   total_master_time = 0.0
   total_routegen_time = 0.0
-  for iter = 1:100
+  for iter = 1:50
     println("ITER $iter")
     # start timer
     tic()

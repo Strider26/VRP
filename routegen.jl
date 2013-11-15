@@ -1,26 +1,29 @@
 using Gurobi
 using JuMP
 
-function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
+function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, prevsol, harsh=false)
   num_nodes = length(nodes)
   depot = num_nodes+1  # Depot is the (n+1)th location
 
   # Create Gurobi Model
   # Disable output
   # Relative MIP optimality gap=0.10
-  m = Model(:Min, mipsolver=GurobiSolver(OutputFlag=0, MIPGap=0.10, TimeLimit=60.0))
+  m = Model(solver=GurobiSolver(OutputFlag=0, MIPGap=0.10, TimeLimit=60.0))
 
   @defVar(m, x[i=1:depot,t_i=1:24,j=1:depot,t_j=1:24], Bin)
   @defVar(m, a[i=1:depot,t_i=1:24] >= t_i)
   @defVar(m, trueT >= 0)
+  setValue(trueT, NaN)
 
   coefs = zeros(depot,24,depot,24)
   const BIGM = 24.0
 
   for i = 1:depot
     for t_i = 1:24
+      setValue(a[i,t_i], NaN)
       for j = 1:depot
         for t_j = 1:24
+          setValue(x[i,t_i,j,t_j], prevsol[i,t_i,j,t_j])
           # No back-in-time or self links
           # No link if no demand
           # Harsh mode: if available after time limit, not allowed to go there
@@ -67,7 +70,7 @@ function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
       @addConstraint(m, sum{x[i,t_i,j,t_j], j=1:depot,t_j=1:24} <= 1)
     end # t_i
   end # i
-  @setObjective(m, sum{coefs[i,t_i,j,t_j]*x[i,t_i,j,t_j], i=1:depot,t_i=1:24,j=1:depot,t_j=1:24} + 1e-6*trueT)
+  @setObjective(m, Min, sum{coefs[i,t_i,j,t_j]*x[i,t_i,j,t_j], i=1:depot,t_i=1:24,j=1:depot,t_j=1:24} + 1e-6*trueT)
 
   # Links in = links out
   for k = 1:num_nodes
@@ -82,7 +85,7 @@ function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
 
   status = solve(m)
   if status != :Optimal
-    return zeros(num_nodes,24,num_nodes,24), T, Inf, Inf
+    return zeros(depot,24,depot,24), T, Inf, Inf
   end
 
   colObj = 0.0
@@ -123,18 +126,6 @@ function SolveMIP(node_duals, nodes, dists, depot_dists, lambda, T, harsh=false)
     end
   end
 
-  #println("         MIP Sol:")
-  #for i = 1:depot
-  #  for t_i = 1:24
-  #    for j = 1:depot
-  #      for t_j = 1:24
-  #        if getValue(x[i,t_i,j,t_j]) > 1e-6
-  #          println("           $i $t_i $j $t_j")
-  #        end
-  #      end
-  #    end
-  #  end
-  #end
   return getValue(x), trueT, colObj+TRUCKFIXED, rcObj+TRUCKFIXED
 end
 
@@ -162,9 +153,11 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
   end
   
   println("       grid_T = ")
-  for grid_T = (first_T-1):1:(last_T)
+  prevsol = NaN*ones(depot,24,depot,24)  # Last solution
+  for grid_T = (first_T):1:(last_T)
     print(round(grid_T+0.5,1), "..")
-    cur_x, cur_T, cur_colObj, cur_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, grid_T+0.5, true)
+    cur_x, cur_T, cur_colObj, cur_rcObj = SolveMIP(node_duals, nodes, dists, depot_dists, lambda, grid_T+0.5, prevsol, true)
+    prevsol = cur_x
     if cur_colObj < 0
       # WTF happened
       println("        Something aberrant happened for grid_T = $grid_T, colobj < 0")
@@ -216,10 +209,11 @@ function SolveSubproblem(node_duals, nodes, dists, depot_dists, lambda)
       end
     end
     println("  SUB: Deduplicated routes, #$(length(dedup_routes))")
+    return dedup_routes
   else
     # No new routes
     println("  SUB: Didn't find route")
+    return negrc_routes
   end
-  return negrc_routes
 end
 
